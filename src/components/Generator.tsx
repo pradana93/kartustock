@@ -189,8 +189,15 @@ export default function Generator() {
     r.readAsText(f);
   }
 
+  // Per-column filters (table-level)
+  const [filterLevel, setFilterLevel] = useState("All");
+  const [colPallet, setColPallet] = useState("");
+  const [colSku, setColSku] = useState("");
+  const [sortCol, setSortCol] = useState<null | "pallet" | "gudang" | "zone" | "level" | "sku" | "status">(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
   const filteredMaster = useMemo(() => {
-    return masterRows.filter((r) => {
+    let out = masterRows.filter((r) => {
       if (search) {
         const q = search.toLowerCase();
         if (!`${r.palletCode} ${r.currentSku} ${r.zoneType} ${r.levelRack} ${r.gudang}`.toLowerCase().includes(q)) return false;
@@ -198,13 +205,44 @@ export default function Generator() {
       if (filterGudang !== "All" && r.gudang !== filterGudang) return false;
       if (filterZone !== "All" && r.zoneType !== filterZone) return false;
       if (filterStatus !== "All" && r.status !== filterStatus) return false;
+      if (filterLevel !== "All" && r.levelRack !== filterLevel) return false;
+      if (colPallet && !r.palletCode.toLowerCase().includes(colPallet.toLowerCase())) return false;
+      if (colSku && !(r.currentSku || "").toLowerCase().includes(colSku.toLowerCase())) return false;
       return true;
     });
-  }, [masterRows, search, filterGudang, filterZone, filterStatus]);
+    if (sortCol) {
+      out = [...out].sort((a, b) => {
+        const get = (r: PalletMasterRow) => {
+          if (sortCol === "pallet") return r.palletCode;
+          if (sortCol === "gudang") return r.gudang;
+          if (sortCol === "zone") return r.zoneType;
+          if (sortCol === "level") return r.levelRack;
+          if (sortCol === "sku") return r.currentSku || "";
+          if (sortCol === "status") return r.status;
+          return "";
+        };
+        const av = get(a).toLowerCase();
+        const bv = get(b).toLowerCase();
+        if (av < bv) return sortDir === "asc" ? -1 : 1;
+        if (av > bv) return sortDir === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return out;
+  }, [masterRows, search, filterGudang, filterZone, filterStatus, filterLevel, colPallet, colSku, sortCol, sortDir]);
 
   const gudangOptions = useMemo(() => ["All", ...Array.from(new Set(masterRows.map((r) => r.gudang).filter(Boolean)))], [masterRows]);
   const zoneOptions = useMemo(() => ["All", ...Array.from(new Set(masterRows.map((r) => r.zoneType).filter(Boolean)))], [masterRows]);
   const statusOptions = useMemo(() => ["All", ...Array.from(new Set(masterRows.map((r) => r.status).filter(Boolean)))], [masterRows]);
+  const levelOptions = useMemo(() => ["All", ...Array.from(new Set(masterRows.map((r) => r.levelRack).filter(Boolean)))], [masterRows]);
+
+  function handleSort(col: typeof sortCol) {
+    if (sortCol === col) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortCol(col); setSortDir("asc"); }
+  }
+  function clearAllFilters() {
+    setSearch(""); setFilterGudang("All"); setFilterZone("All"); setFilterStatus("All"); setFilterLevel("All"); setColPallet(""); setColSku("");
+  }
 
   function toggleSelect(code: string) {
     setSelected((prev) => {
@@ -355,18 +393,30 @@ export default function Generator() {
 
             {masterRows.length > 0 && (
               <>
-                {/* Filters */}
-                <div className="grid grid-cols-1 lg:grid-cols-[1fr_160px_160px_160px] gap-3">
-                  <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="🔍 Search pallet / SKU / zone…" className="bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-amber-500" />
-                  <select value={filterGudang} onChange={(e) => setFilterGudang(e.target.value)} className="bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2.5 text-sm">
-                    {gudangOptions.map((o) => <option key={o} value={o}>{o === "All" ? "All Gudang" : o}</option>)}
-                  </select>
-                  <select value={filterZone} onChange={(e) => setFilterZone(e.target.value)} className="bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2.5 text-sm">
-                    {zoneOptions.map((o) => <option key={o} value={o}>{o === "All" ? "All Zone Type" : o}</option>)}
-                  </select>
-                  <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2.5 text-sm">
-                    {statusOptions.map((o) => <option key={o} value={o}>{o === "All" ? "All Status" : o}</option>)}
-                  </select>
+                {/* Filters - sticky, always visible above table */}
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 lg:grid-cols-[1fr_140px_140px_140px_140px] gap-2">
+                    <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="🔍 Global search: pallet / SKU / zone…" className="bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-amber-500" />
+                    <select value={filterGudang} onChange={(e) => setFilterGudang(e.target.value)} className="bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2.5 text-sm">
+                      {gudangOptions.map((o) => <option key={o} value={o}>{o === "All" ? "All Gudang" : o}</option>)}
+                    </select>
+                    <select value={filterZone} onChange={(e) => setFilterZone(e.target.value)} className="bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2.5 text-sm">
+                      {zoneOptions.map((o) => <option key={o} value={o}>{o === "All" ? "All Zone" : o}</option>)}
+                    </select>
+                    <select value={filterLevel} onChange={(e) => setFilterLevel(e.target.value)} className="bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2.5 text-sm">
+                      {levelOptions.map((o) => <option key={o} value={o}>{o === "All" ? "All Level/Rack" : o}</option>)}
+                    </select>
+                    <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2.5 text-sm">
+                      {statusOptions.map((o) => <option key={o} value={o}>{o === "All" ? "All Status" : o}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex flex-wrap gap-2 items-center text-xs">
+                    <span className="bg-zinc-900 text-white px-3 py-1.5 rounded-full font-bold">Showing {filteredMaster.length} / {masterRows.length}</span>
+                    {(search || filterGudang !== "All" || filterZone !== "All" || filterLevel !== "All" || filterStatus !== "All" || colPallet || colSku) && (
+                      <button onClick={clearAllFilters} className="bg-white border border-zinc-200 px-3 py-1.5 rounded-full font-semibold hover:bg-zinc-50">✕ Clear all filters</button>
+                    )}
+                    {sortCol && <span className="text-zinc-500">Sorted by {sortCol} {sortDir === "asc" ? "↑" : "↓"}</span>}
+                  </div>
                 </div>
 
                 {/* Want to Selected Generate & Print option */}
@@ -412,20 +462,31 @@ export default function Generator() {
 
                 {/* Table */}
                 <div className="border border-zinc-200 rounded-xl overflow-hidden">
-                  <div className="max-h-[420px] overflow-auto">
+                  <div className="max-h-[480px] overflow-auto">
                     <table className="w-full text-xs">
-                      <thead className="sticky top-0 bg-zinc-900 text-white text-[11px] tracking-wide">
+                      <thead className="sticky top-0 z-10 bg-zinc-900 text-white text-[11px] tracking-wide">
                         <tr>
                           <th className="p-2.5 text-center w-10">
                             <input type="checkbox" checked={filteredMaster.length > 0 && filteredMaster.every((r) => selected.has(r.palletCode))} onChange={(e) => e.target.checked ? selectAllFiltered() : clearSelected()} />
                           </th>
-                          <th className="p-2.5 text-left">Pallet Code</th>
-                          <th className="p-2.5 text-left">Gudang</th>
-                          <th className="p-2.5 text-left">Zone</th>
-                          <th className="p-2.5 text-left">Level/Rack</th>
+                          <th className="p-2.5 text-left cursor-pointer select-none" onClick={() => handleSort("pallet")}>Pallet Code {sortCol==="pallet" ? (sortDir==="asc"?"↑":"↓") : "↕"}</th>
+                          <th className="p-2.5 text-left cursor-pointer select-none" onClick={() => handleSort("gudang")}>Gudang {sortCol==="gudang" ? (sortDir==="asc"?"↑":"↓") : "↕"}</th>
+                          <th className="p-2.5 text-left cursor-pointer select-none" onClick={() => handleSort("zone")}>Zone {sortCol==="zone" ? (sortDir==="asc"?"↑":"↓") : "↕"}</th>
+                          <th className="p-2.5 text-left cursor-pointer select-none" onClick={() => handleSort("level")}>Level/Rack {sortCol==="level" ? (sortDir==="asc"?"↑":"↓") : "↕"}</th>
                           <th className="p-2.5 text-left">Max Cap</th>
-                          <th className="p-2.5 text-left">SKU</th>
-                          <th className="p-2.5 text-left">Status</th>
+                          <th className="p-2.5 text-left cursor-pointer select-none" onClick={() => handleSort("sku")}>SKU {sortCol==="sku" ? (sortDir==="asc"?"↑":"↓") : "↕"}</th>
+                          <th className="p-2.5 text-left cursor-pointer select-none" onClick={() => handleSort("status")}>Status {sortCol==="status" ? (sortDir==="asc"?"↑":"↓") : "↕"}</th>
+                        </tr>
+                        {/* Per-column quick filters directly on table */}
+                        <tr className="bg-white text-black">
+                          <th className="p-1.5"></th>
+                          <th className="p-1.5"><input value={colPallet} onChange={(e)=>setColPallet(e.target.value)} placeholder="Filter code…" className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-2 py-1.5 text-xs font-normal placeholder:text-zinc-400" /></th>
+                          <th className="p-1.5"></th>
+                          <th className="p-1.5"></th>
+                          <th className="p-1.5"></th>
+                          <th className="p-1.5"></th>
+                          <th className="p-1.5"><input value={colSku} onChange={(e)=>setColSku(e.target.value)} placeholder="Filter SKU…" className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-2 py-1.5 text-xs font-normal placeholder:text-zinc-400" /></th>
+                          <th className="p-1.5"></th>
                         </tr>
                       </thead>
                       <tbody>
