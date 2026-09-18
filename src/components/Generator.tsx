@@ -29,11 +29,14 @@ function masterToCard(row: PalletMasterRow, base: StockCardData): StockCardData 
 }
 
 export default function Generator() {
-  const [cards, setCards] = useState<StockCardData[]>([{ ...defaultCard, id: uid() }]);
-  const [activeId, setActiveId] = useState<string>(cards[0].id);
+  // Queue starts empty - no pending dummy (user requested)
+  const [cards, setCards] = useState<StockCardData[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [bulkInput, setBulkInput] = useState("");
   const [showBulk, setShowBulk] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
+  // Draft template for Card Details when queue empty (fixes cannot-edit)
+  const [draft, setDraft] = useState<StockCardData>({ ...defaultCard, id: "draft" });
 
   // Master sheet state
   const [sheetUrl, setSheetUrl] = useState("");
@@ -51,29 +54,36 @@ export default function Generator() {
   const [printLayout, setPrintLayout] = useState<"1" | "2">("1");
   const [ephemeralPrint, setEphemeralPrint] = useState<StockCardData[] | null>(null);
 
-  const activeCard = cards.find((c) => c.id === activeId) || cards[0];
+  const hasCards = cards.length > 0;
+  const activeCard = hasCards ? (cards.find((c) => c.id === activeId) || cards[0]) : draft;
 
   function updateActive(patch: Partial<StockCardData>) {
-    setCards((prev) => prev.map((c) => (c.id === activeId ? { ...c, ...patch } : c)));
+    if (hasCards && activeId) {
+      setCards((prev) => prev.map((c) => (c.id === activeId ? { ...c, ...patch } : c)));
+    } else {
+      setDraft((prev) => ({ ...prev, ...patch }));
+    }
   }
 
   function addCard() {
-    const c = { ...defaultCard, id: uid(), palletCode: "", skuName: "", zone: "" };
+    // push current draft as a new card then reset draft
+    const base = hasCards ? activeCard : draft;
+    const c: StockCardData = { ...base, id: uid() };
     setCards((p) => [...p, c]);
     setActiveId(c.id);
   }
 
   function duplicateCard() {
+    if (!hasCards && !draft) return;
     const c = { ...activeCard, id: uid() };
     setCards((p) => [...p, c]);
     setActiveId(c.id);
   }
 
   function removeCard(id: string) {
-    if (cards.length === 1) return;
     const next = cards.filter((c) => c.id !== id);
     setCards(next);
-    if (id === activeId) setActiveId(next[0].id);
+    if (id === activeId) setActiveId(next.length ? next[0].id : null);
   }
 
   function handleBulkGenerate() {
@@ -93,11 +103,12 @@ export default function Generator() {
   }
 
   function handlePrint() {
-    window.print();
+    // Print the currently edited card (draft if queue empty, otherwise active card)
+    triggerPrint([activeCard], printLayout);
   }
 
   async function handleDownloadPDF() {
-    window.print();
+    triggerPrint([activeCard], printLayout);
   }
 
   function handleCSVImport(e: React.ChangeEvent<HTMLInputElement>) {
@@ -308,15 +319,25 @@ export default function Generator() {
     triggerPrint(toPrint, printLayout);
   }
 
-  // persist
+  // persist - queue now starts empty, migrate old dummy single-card storage
   useEffect(() => {
     const saved = localStorage.getItem("kartustock:cards");
+    const savedDraft = localStorage.getItem("kartustock:draft");
+    if (savedDraft) {
+      try { const d = JSON.parse(savedDraft); if (d && d.palletCode) setDraft(d); } catch {}
+    }
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length) {
-          setCards(parsed);
-          setActiveId(parsed[0].id);
+          // migrate: if only dummy C12-DRY-08 Sticker Labelling and nothing else, treat as empty (user wanted no pending)
+          const isDummyOnly = parsed.length === 1 && parsed[0].palletCode === "C12-DRY-08" && parsed[0].skuName === "Sticker Labelling";
+          if (!isDummyOnly) {
+            setCards(parsed);
+            setActiveId(parsed[0].id);
+          } else {
+            localStorage.setItem("kartustock:cards", JSON.stringify([]));
+          }
         }
       } catch {}
     }
@@ -332,6 +353,7 @@ export default function Generator() {
     localStorage.setItem("kartustock:cards", JSON.stringify(cards));
     fetch("/api/cards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cards) }).catch(() => {});
   }, [cards]);
+  useEffect(() => { localStorage.setItem("kartustock:draft", JSON.stringify(draft)); }, [draft]);
 
   useEffect(() => { localStorage.setItem("kartustock:masterRows", JSON.stringify(masterRows)); }, [masterRows]);
   useEffect(() => { localStorage.setItem("kartustock:sheetUrl", sheetUrl); }, [sheetUrl]);
@@ -491,7 +513,7 @@ export default function Generator() {
 
       <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-6 items-start">
         {/* LEFT PANEL - FORM */}
-        <div className="no-print sticky top-6 space-y-4">
+        <div className="no-print sticky top-[72px] space-y-4">
           {/* Card Tabs */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-3">
             <div className="flex items-center justify-between mb-3">
@@ -697,10 +719,16 @@ export default function Generator() {
                 ⬇ PDF
               </button>
               <button
-                onClick={() => setCards([{ ...defaultCard, id: uid() }])}
+                onClick={() => {
+                  setCards([]);
+                  setActiveId(null);
+                  setDraft({ ...defaultCard, id: "draft" });
+                  localStorage.removeItem("kartustock:cards");
+                  localStorage.removeItem("kartustock:draft");
+                }}
                 className="col-span-2 text-xs text-zinc-500 font-semibold py-2 hover:text-red-600"
               >
-                Reset all (clear local storage)
+                Reset all (clear)
               </button>
             </div>
 
@@ -747,23 +775,30 @@ export default function Generator() {
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[520px] overflow-auto p-1">
-              {cards.map((c) => (
-                <div
-                  key={c.id}
-                  onClick={() => setActiveId(c.id)}
-                  className={`cursor-pointer rounded-xl overflow-hidden border-2 transition ${c.id === activeId ? "border-amber-500 shadow-lg" : "border-zinc-200 hover:border-zinc-300"}`}
-                >
-                  <div className="scale-[0.55] origin-top-left w-[180%] h-[220px] -mb-[140px] pointer-events-none">
-                    <StockCard data={c} showQR={false} />
-                  </div>
-                  <div className="bg-zinc-900 text-white text-[11px] font-bold px-3 py-2 flex justify-between">
-                    <span>{c.palletCode || "No code"}</span>
-                    <span className="text-zinc-400 truncate ml-2">{c.skuName}</span>
-                  </div>
+              {cards.length === 0 ? (
+                <div className="col-span-2 py-12 text-center border-2 border-dashed border-zinc-200 rounded-xl bg-zinc-50">
+                  <div className="text-sm font-bold text-zinc-600">No cards in queue</div>
+                  <div className="text-xs text-zinc-400 mt-1">Generate from Master Data above or create with + New. Edit Card Details on left and print preview directly.</div>
                 </div>
-              ))}
+              ) : (
+                cards.map((c) => (
+                  <div
+                    key={c.id}
+                    onClick={() => setActiveId(c.id)}
+                    className={`cursor-pointer rounded-xl overflow-hidden border-2 transition ${c.id === activeId ? "border-amber-500 shadow-lg" : "border-zinc-200 hover:border-zinc-300"}`}
+                  >
+                    <div className="scale-[0.55] origin-top-left w-[180%] h-[220px] -mb-[140px] pointer-events-none">
+                      <StockCard data={c} showQR={false} />
+                    </div>
+                    <div className="bg-zinc-900 text-white text-[11px] font-bold px-3 py-2 flex justify-between">
+                      <span>{c.palletCode || "No code"}</span>
+                      <span className="text-zinc-400 truncate ml-2">{c.skuName}</span>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
-            {cards.length > 1 && <div className="mt-3 flex gap-2">
+            {cards.length > 0 && <div className="mt-3 flex gap-2">
               <button onClick={() => triggerPrint(cards, printLayout)} className="flex-1 bg-zinc-900 text-white py-2.5 rounded-xl text-xs font-black">🖨️ Print All {cards.length} Cards — {printLayout === "2" ? "2 per A4 (saving)" : "1 per A4"}</button>
             </div>}
           </div>
@@ -771,7 +806,8 @@ export default function Generator() {
           {/* Ephemeral / Bulk Print A4 - print only */}
           <div className="hidden print:block">
             {(() => {
-              const toPrint = ephemeralPrint && ephemeralPrint.length ? ephemeralPrint : cards;
+              const fallback = cards.length ? cards : [draft];
+              const toPrint = ephemeralPrint && ephemeralPrint.length ? ephemeralPrint : fallback;
               if (printLayout === "2") {
                 // 2 cards per A4
                 return (
