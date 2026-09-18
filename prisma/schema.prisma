@@ -1,0 +1,24 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model StockCard {
+  id         String   @id @default(cuid())
+  palletCode String
+  zone       String
+  skuName    String
+  maxQuota   String?
+  expDate    String?
+  qcCheck    String?
+  rows       Int      @default(12)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([palletCode])
+  @@map("stock_cards")
+}
