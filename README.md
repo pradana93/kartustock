@@ -53,7 +53,7 @@ npx next build --webpack
 
 ## Vercel Deploy
 
-1. Import `https://github.com/pradana93/kartustock` in Vercel.
+1. Import your GitHub repo in Vercel.
 2. **No DB needed** — leave `DATABASE_URL` empty, app uses `localStorage`.
 3. **With DB** — add hosted MySQL URL (PlanetScale, Railway, TiDB Cloud) as `DATABASE_URL` env in Vercel → Redeploy → Prisma auto-migrates (run `npx prisma db push` locally against that URL once).
 4. Build command: `next build` (Linux native bindings ok). On Windows local, use `next build --webpack`.
@@ -79,4 +79,4 @@ npx next build --webpack
 
 ## License
 
-Internal use — Vittoria Warehouse DC.
+Internal use — Warehouse DC.

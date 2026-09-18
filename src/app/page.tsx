@@ -20,19 +20,12 @@ export default function Home() {
             <span className="flex items-center gap-2">
               <span className="w-2 h-2 bg-amber-500 rounded-full" /> Vercel Deployable
             </span>
-            <span className="hidden lg:block">Vittoria • Warehouse DC</span>
+            <span className="hidden lg:block">Warehouse DC</span>
           </div>
           <div className="flex items-center gap-2">
-            <a
-              href="https://github.com/pradana93/kartustock"
-              target="_blank"
-              className="hidden sm:inline-flex text-xs font-bold border border-zinc-700 rounded-full px-4 py-2 hover:bg-white hover:text-black transition"
-            >
-              GitHub
-            </a>
             <div className="hidden sm:flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-full px-3 py-2 text-[11px]">
-              <span className="w-6 h-6 rounded-full bg-white text-black grid place-items-center font-bold">VT</span>
-              <span className="text-zinc-300 hidden lg:inline">wh.leader.vt@gmail.com</span>
+              <span className="w-6 h-6 rounded-full bg-white text-black grid place-items-center font-bold">WH</span>
+              <span className="text-zinc-300 hidden lg:inline">Warehouse</span>
             </div>
           </div>
         </div>
@@ -113,11 +106,11 @@ export default function Home() {
         <div className="max-w-[1600px] mx-auto flex flex-col sm:flex-row justify-between gap-4 text-xs text-zinc-500">
           <div>
             <div className="font-bold text-white">KARTUSTOCK • Warehouse Stock Card Generator</div>
-            <div>Built for Vittoria Thingy Warehouse DC • Local MySQL + Vercel ready • No cloud DB required</div>
+            <div>Local MySQL + Vercel ready • No cloud DB required</div>
           </div>
           <div className="text-right">
             <div>Deploy on Vercel — set DATABASE_URL for MySQL persistence</div>
-            <div>© 2026 pradana93/kartustock — flagship</div>
+            <div>© 2026 KARTUSTOCK — flagship</div>
           </div>
         </div>
       </footer>

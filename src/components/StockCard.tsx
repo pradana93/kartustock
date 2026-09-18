@@ -77,7 +77,7 @@ export function StockCard({ data, showQR = true }: { data: StockCardData; showQR
       {/* Footer mini */}
       {showQR && (
         <div className="flex justify-between items-center px-2 py-1.5 bg-[#F8F8F8] border-t border-black text-[7px] text-gray-600">
-          <span>Kartu Stock Generator • Vittoria Warehouse • {new Date().getFullYear()}</span>
+          <span>Kartu Stock Generator • Warehouse • {new Date().getFullYear()}</span>
           <span className="font-mono font-bold tracking-widest">PALLET: {data.palletCode || "—"}</span>
         </div>
       )}
