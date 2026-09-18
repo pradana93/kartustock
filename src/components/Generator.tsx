@@ -50,7 +50,6 @@ export default function Generator() {
   // Bulk Print A4 state
   const [printLayout, setPrintLayout] = useState<"1" | "2">("1");
   const [ephemeralPrint, setEphemeralPrint] = useState<StockCardData[] | null>(null);
-  const [autoPrintOnGenerate, setAutoPrintOnGenerate] = useState(false);
 
   const activeCard = cards.find((c) => c.id === activeId) || cards[0];
 
@@ -419,45 +418,21 @@ export default function Generator() {
                   </div>
                 </div>
 
-                {/* Want to Selected Generate & Print option */}
-                <label className="flex items-center gap-2.5 bg-white border border-amber-300 rounded-xl px-4 py-3 cursor-pointer hover:bg-amber-50/50">
-                  <input type="checkbox" checked={autoPrintOnGenerate} onChange={(e) => setAutoPrintOnGenerate(e.target.checked)} className="w-4 h-4 accent-amber-500" />
-                  <span className="text-xs font-black tracking-wide">Want to Selected Generate & Print Stock Cards?</span>
-                  <span className="text-[11px] text-zinc-500 ml-auto hidden sm:block">When ON, Generate will auto-print A4</span>
-                </label>
-                {/* Actions */}
-                <div className="flex flex-wrap gap-2">
-                  <button onClick={selectAllFiltered} className="text-xs bg-zinc-900 text-white px-4 py-2.5 rounded-full font-bold">☑ Select filtered ({filteredMaster.length})</button>
-                  <button onClick={clearSelected} className="text-xs bg-white border border-zinc-200 px-4 py-2.5 rounded-full font-semibold">Clear selection</button>
-                  <div className="flex-1" />
-                  <button
-                    onClick={() => {
-                      if (autoPrintOnGenerate) generateAndPrintSelected();
-                      else generateFromSelected();
-                    }}
-                    disabled={selected.size === 0}
-                    className={`text-xs px-5 py-2.5 rounded-full font-black disabled:opacity-40 ${autoPrintOnGenerate ? "bg-gradient-to-r from-amber-500 to-orange-500 text-black" : "bg-amber-500 text-black"}`}
-                  >
-                    {autoPrintOnGenerate ? `🖨️ Generate & Print ${selected.size} Selected → A4` : `⚡ Generate ${selected.size} Selected → Stock Cards`}
-                  </button>
-                  <button onClick={generateFromFiltered} disabled={filteredMaster.length === 0} className="text-xs bg-white border border-amber-300 text-amber-700 px-4 py-2.5 rounded-full font-bold disabled:opacity-40">Generate filtered ({filteredMaster.length})</button>
-                  <button onClick={generateAllMaster} className="text-xs bg-white border border-zinc-200 px-4 py-2.5 rounded-full font-semibold">Generate ALL ({masterRows.length})</button>
-                </div>
-                {/* Generate & Print + Bulk Print A4 */}
+                {/* Simplified Actions - flagship, clean */}
                 <div className="bg-zinc-900 rounded-xl p-3 flex flex-wrap gap-2 items-center border border-zinc-800">
-                  <div className="flex items-center gap-2 text-white text-xs font-bold">
-                    <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" /> Bulk Print A4
-                    <select value={printLayout} onChange={(e) => setPrintLayout(e.target.value as "1" | "2")} className="ml-2 bg-white text-black rounded-full px-3 py-1.5 text-xs font-bold">
-                      <option value="1">1 / page (large)</option>
-                      <option value="2">2 / page (saving)</option>
+                  <button onClick={selectAllFiltered} className="text-xs bg-white text-black px-4 py-2.5 rounded-full font-bold">Select filtered ({filteredMaster.length})</button>
+                  <button onClick={clearSelected} className="text-xs bg-zinc-800 text-white border border-zinc-700 px-4 py-2.5 rounded-full font-semibold">Clear</button>
+                  <span className="hidden sm:block w-px h-6 bg-zinc-700 mx-1" />
+                  <span className="text-xs text-zinc-400 hidden lg:block">{selected.size} selected</span>
+                  <div className="flex-1" />
+                  <div className="flex items-center gap-2">
+                    <select value={printLayout} onChange={(e) => setPrintLayout(e.target.value as "1" | "2")} className="bg-white text-black rounded-full px-3 py-1.5 text-xs font-bold border border-zinc-200">
+                      <option value="1">1 / A4</option>
+                      <option value="2">2 / A4</option>
                     </select>
                   </div>
-                  <div className="flex-1" />
-                  <button onClick={generateAndPrintSelected} disabled={selected.size === 0} className="text-xs bg-gradient-to-r from-amber-500 to-orange-500 text-black px-5 py-2.5 rounded-full font-black disabled:opacity-40 flex items-center gap-1.5">
-                    🖨️ Generate & Print Selected ({selected.size}) → A4
-                  </button>
-                  <button onClick={() => handleBulkPrintA4("selected")} disabled={selected.size === 0} className="text-xs bg-white text-black px-4 py-2.5 rounded-full font-bold disabled:opacity-40">Bulk Print Selected A4</button>
-                  <button onClick={() => handleBulkPrintA4("filtered")} disabled={filteredMaster.length === 0} className="text-xs bg-zinc-800 text-white border border-zinc-700 px-4 py-2.5 rounded-full font-semibold">Bulk Print Filtered A4 ({filteredMaster.length})</button>
+                  <button onClick={generateFromSelected} disabled={selected.size === 0} className="text-xs bg-amber-500 text-black px-5 py-2.5 rounded-full font-black disabled:opacity-40">Generate {selected.size ? `(${selected.size})` : ""}</button>
+                  <button onClick={generateAndPrintSelected} disabled={selected.size === 0} className="text-xs bg-white text-zinc-900 border border-white px-5 py-2.5 rounded-full font-black disabled:opacity-40">🖨️ Print {selected.size ? `(${selected.size})` : ""} → A4</button>
                 </div>
 
                 {/* Table */}
