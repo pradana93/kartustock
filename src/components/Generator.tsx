@@ -214,7 +214,7 @@ export default function Generator() {
       }
       if (filterGudang !== "All" && r.gudang !== filterGudang) return false;
       if (filterZone !== "All" && r.zoneType !== filterZone) return false;
-      if (filterStatus !== "All" && r.status !== filterStatus) return false;
+      if (filterStatus !== "All" && !r.status.toLowerCase().includes(filterStatus.toLowerCase())) return false;
       if (filterLevel !== "All" && r.levelRack !== filterLevel) return false;
       if (colPallet && !r.palletCode.toLowerCase().includes(colPallet.toLowerCase())) return false;
       if (colSku && !(r.currentSku || "").toLowerCase().includes(colSku.toLowerCase())) return false;
@@ -416,8 +416,8 @@ export default function Generator() {
               <>
                 {/* Filters - sticky, always visible above table */}
                 <div className="space-y-3">
-                  <div className="grid grid-cols-1 lg:grid-cols-[1fr_140px_140px_140px_140px] gap-2">
-                    <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="🔍 Global search: pallet / SKU / zone…" className="bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-amber-500" />
+                  <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="🔍 Global search: pallet / SKU / zone…" className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-amber-500" />
+                  <div className="grid grid-cols-1 lg:grid-cols-[140px_140px_140px_1fr] gap-2 items-center">
                     <select value={filterGudang} onChange={(e) => setFilterGudang(e.target.value)} className="bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2.5 text-sm">
                       {gudangOptions.map((o) => <option key={o} value={o}>{o === "All" ? "All Gudang" : o}</option>)}
                     </select>
@@ -427,9 +427,23 @@ export default function Generator() {
                     <select value={filterLevel} onChange={(e) => setFilterLevel(e.target.value)} className="bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2.5 text-sm">
                       {levelOptions.map((o) => <option key={o} value={o}>{o === "All" ? "All Level/Rack" : o}</option>)}
                     </select>
-                    <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2.5 text-sm">
-                      {statusOptions.map((o) => <option key={o} value={o}>{o === "All" ? "All Status" : o}</option>)}
-                    </select>
+                    {/* Status filter - prominent Available / Occupied toggle */}
+                    <div className="flex items-center gap-1.5 bg-zinc-900 rounded-xl p-1.5">
+                      <span className="text-[11px] font-bold text-zinc-400 px-2 hidden sm:block">Status:</span>
+                      {[
+                        { label: "All", value: "All", count: masterRows.length },
+                        { label: "Available", value: "Available", count: masterRows.filter((r) => r.status.toLowerCase().includes("avail")).length },
+                        { label: "Occupied", value: "Occupied", count: masterRows.filter((r) => r.status.toLowerCase().includes("occup")).length },
+                      ].map((opt) => (
+                        <button
+                          key={opt.value}
+                          onClick={() => setFilterStatus(opt.value)}
+                          className={`flex-1 text-xs font-black px-3 py-2 rounded-lg transition ${filterStatus === opt.value ? (opt.value === "Available" ? "bg-emerald-500 text-white" : opt.value === "Occupied" ? "bg-amber-500 text-black" : "bg-white text-black") : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"}`}
+                        >
+                          {opt.label} <span className="opacity-70">({opt.count})</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-2 items-center text-xs">
                     <span className="bg-zinc-900 text-white px-3 py-1.5 rounded-full font-bold">Showing {filteredMaster.length} / {masterRows.length}</span>
