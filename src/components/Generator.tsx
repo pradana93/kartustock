@@ -146,13 +146,22 @@ export default function Generator() {
     try {
       const res = await fetch("/api/sheet", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: sheetUrl }) });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || data.hint || "Failed to load");
+      if (!res.ok) throw new Error([data.error, data.hint].filter(Boolean).join(" — ") || "Failed to load");
       const csv: string = data.csv;
       const parsed = parseMasterCSV(csv);
-      if (!parsed.length) throw new Error("No pallet rows found. Check that the sheet tab is 'Pallet Code' and has columns Pallet Code, Gudang, Zone Type...");
+      if (!parsed.length) {
+        const preview = csv.slice(0, 400).replace(/\n/g, " | ");
+        throw new Error(`No pallet rows found in fetched tab (gid=${data.gid ?? "default"}). Open the 'Pallet Code' tab specifically and copy its URL (should contain gid=1688169041), or use Upload CSV. Preview: ${preview}…`);
+      }
       setMasterRows(parsed);
-      setMasterSource(`Google Sheet (${parsed.length} pallets)`);
+      setMasterSource(`Google Sheet (${parsed.length} pallets${data.gid ? ` · gid=${data.gid}` : ""})`);
       setSelected(new Set());
+      if (data.gid && !sheetUrl.includes("gid=")) {
+        // auto-fix URL to include correct gid for next time
+        const sep = sheetUrl.includes("?") ? "&" : "?";
+        const fixed = sheetUrl.replace(/#.*$/, "") + `${sep}gid=${data.gid}`;
+        setSheetUrl(fixed);
+      }
     } catch (err: unknown) {
       setSheetError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -287,11 +296,18 @@ export default function Generator() {
                 {masterRows.length > 0 && <button onClick={() => { setMasterRows([]); setSelected(new Set()); setMasterSource(""); localStorage.removeItem("kartustock:masterRows"); }} className="px-4 py-3 rounded-xl border border-zinc-200 text-sm font-semibold">Clear</button>}
               </div>
             </div>
-            {sheetError && <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl px-4 py-3 leading-relaxed">{sheetError}</div>}
+            {sheetError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl px-4 py-3 leading-relaxed space-y-2">
+                <div>{sheetError}</div>
+                {sheetUrl && !sheetUrl.includes("gid=") && (
+                  <button onClick={() => setSheetUrl(sheetUrl.replace(/#.*$/, "") + (sheetUrl.includes("?") ? "&" : "?") + "gid=1688169041")} className="bg-red-600 text-white px-3 py-1.5 rounded-full font-bold text-xs">Fix URL → Add Pallet Code gid</button>
+                )}
+              </div>
+            )}
             {!sheetError && masterSource && <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl px-4 py-2.5">✓ {masterSource} — ready. Use filters & checkboxes below, then generate.</div>}
             <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs leading-relaxed text-amber-900">
-              <b>How to connect:</b> Open your spreadsheet → <b>Share → General access → Anyone with link (Viewer)</b> → Copy URL here → Load. Or <b>File → Download → CSV</b> and upload. The app auto-detects side-by-side tables (C11/C12 etc) in the “Pallet Code” tab.
-              <br/><span className="text-amber-700">Privacy: URL is stored only in your browser (localStorage), never hardcoded or sent elsewhere except to fetch the sheet.</span>
+              <b>How to connect:</b> Open the <b>“Pallet Code” tab</b> specifically → <b>Share → General access → Anyone with link (Viewer)</b> → Copy URL from address bar (must contain <code className="bg-white px-1 rounded">gid=1688169041</code>) → Load. Or <b>File → Download → CSV</b> and upload. The app auto-detects side-by-side tables (C11/C12 etc).
+              <br/><span className="text-amber-700">Privacy: URL is stored only in your browser (localStorage), never hardcoded or sent elsewhere except to fetch the sheet. Auto-fallback tries Pallet Code tab even if you paste URL without gid.</span>
             </div>
 
             {masterRows.length > 0 && (

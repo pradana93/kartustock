@@ -33,12 +33,17 @@ function parseCSVLine(line: string): string[] {
 }
 
 const PALLET_RE = /^[A-Z]{1,3}\d*-[A-Z0-9]+-[A-Z0-9\-]*\d+$/i;
+function isHeaderCell(v: string): boolean {
+  const t = v.trim().toLowerCase();
+  return t === "pallet code" || t === "gudang" || t === "zone type" || t === "status" || t === "level / rack";
+}
 // fallback broader: contains dash and not header
 function isPalletCode(v: string): boolean {
-  if (!v || v === "Pallet Code" || v.toLowerCase().includes("pallet")) return false;
+  if (!v || isHeaderCell(v) || v.toLowerCase().includes("pallet code")) return false;
   const s = v.trim();
   if (s.length < 6) return false;
   if (!s.includes("-")) return false;
+  if (s.includes(" ")) return false; // pallet codes never have spaces (prevents Level A / Bay 1 false positive)
   // allow C11-RC-A1-01, C12-DRY-08, C12-C28-01, etc
   if (PALLET_RE.test(s)) return true;
   // broader: at least 2 dashes and alphanum
