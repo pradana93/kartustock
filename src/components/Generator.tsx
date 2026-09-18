@@ -1,11 +1,31 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { StockCard } from "./StockCard";
 import { StockCardData, defaultCard } from "@/lib/types";
 import { QRCodeSVG } from "qrcode.react";
+import { parseMasterCSV, PalletMasterRow } from "@/lib/sheet";
 
 function uid() {
   return Math.random().toString(36).slice(2, 9);
+}
+
+function masterToCard(row: PalletMasterRow, base: StockCardData): StockCardData {
+  const zoneParts = [row.zoneType, row.levelRack].filter(Boolean).join(" • ");
+  const zone = zoneParts || row.zoneType || row.gudang || "";
+  const sku = row.currentSku && row.currentSku !== "None" && row.currentSku !== "-" ? row.currentSku : "";
+  const maxQuota = row.maxCapacity && row.maxCapacity !== "-" ? row.maxCapacity : "";
+  return {
+    id: uid(),
+    palletCode: row.palletCode,
+    zone: zone + (row.gudang ? ` (${row.gudang})` : ""),
+    skuName: sku,
+    maxQuota,
+    expDate: row.expDate && row.expDate !== "-" ? row.expDate : "",
+    qcCheck: "",
+    rows: base.rows,
+    paperSize: "A4",
+    orientation: "portrait",
+  };
 }
 
 export default function Generator() {
@@ -14,6 +34,19 @@ export default function Generator() {
   const [bulkInput, setBulkInput] = useState("");
   const [showBulk, setShowBulk] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
+
+  // Master sheet state
+  const [sheetUrl, setSheetUrl] = useState("");
+  const [masterRows, setMasterRows] = useState<PalletMasterRow[]>([]);
+  const [loadingSheet, setLoadingSheet] = useState(false);
+  const [sheetError, setSheetError] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState("");
+  const [filterGudang, setFilterGudang] = useState("All");
+  const [filterZone, setFilterZone] = useState("All");
+  const [filterStatus, setFilterStatus] = useState("All");
+  const [showMaster, setShowMaster] = useState(true);
+  const [masterSource, setMasterSource] = useState<string>("");
 
   const activeCard = cards.find((c) => c.id === activeId) || cards[0];
 
@@ -61,7 +94,6 @@ export default function Generator() {
   }
 
   async function handleDownloadPDF() {
-    // Use browser print to PDF - faithful to screenshot
     window.print();
   }
 
@@ -71,7 +103,17 @@ export default function Generator() {
     const reader = new FileReader();
     reader.onload = () => {
       const text = String(reader.result || "");
-      const rows = text.split("\n").slice(1); // skip header if present
+      // try master parser first, if it yields pallet rows with gudang, use that path
+      const parsedMaster = parseMasterCSV(text);
+      if (parsedMaster.length > 2) {
+        setMasterRows(parsedMaster);
+        setMasterSource(`CSV: ${file.name}`);
+        setSheetError("");
+        setSelected(new Set());
+        setShowMaster(true);
+        return;
+      }
+      const rows = text.split("\n").slice(1);
       const parsed: StockCardData[] = [];
       rows.forEach((line) => {
         const [pallet, zone, sku, maxQ, exp, qc] = line.split(",").map((s) => s?.trim());
@@ -94,7 +136,97 @@ export default function Generator() {
     reader.readAsText(file);
   }
 
-  // persist to localStorage (acts as local DB fallback) + try mysql via API if available
+  async function loadFromSheet() {
+    if (!sheetUrl.trim()) {
+      setSheetError("Paste your Google Sheets URL first (e.g. https://docs.google.com/spreadsheets/d/.../edit#gid=...)");
+      return;
+    }
+    setLoadingSheet(true);
+    setSheetError("");
+    try {
+      const res = await fetch("/api/sheet", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: sheetUrl }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || data.hint || "Failed to load");
+      const csv: string = data.csv;
+      const parsed = parseMasterCSV(csv);
+      if (!parsed.length) throw new Error("No pallet rows found. Check that the sheet tab is 'Pallet Code' and has columns Pallet Code, Gudang, Zone Type...");
+      setMasterRows(parsed);
+      setMasterSource(`Google Sheet (${parsed.length} pallets)`);
+      setSelected(new Set());
+    } catch (err: unknown) {
+      setSheetError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoadingSheet(false);
+    }
+  }
+
+  function handleMasterCSVUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      const t = String(r.result || "");
+      const p = parseMasterCSV(t);
+      if (!p.length) { setSheetError("No pallets found in CSV. Export the 'Pallet Code' tab as CSV and try again."); return; }
+      setMasterRows(p);
+      setMasterSource(`CSV: ${f.name} (${p.length})`);
+      setSheetError("");
+      setSelected(new Set());
+    };
+    r.readAsText(f);
+  }
+
+  const filteredMaster = useMemo(() => {
+    return masterRows.filter((r) => {
+      if (search) {
+        const q = search.toLowerCase();
+        if (!`${r.palletCode} ${r.currentSku} ${r.zoneType} ${r.levelRack} ${r.gudang}`.toLowerCase().includes(q)) return false;
+      }
+      if (filterGudang !== "All" && r.gudang !== filterGudang) return false;
+      if (filterZone !== "All" && r.zoneType !== filterZone) return false;
+      if (filterStatus !== "All" && r.status !== filterStatus) return false;
+      return true;
+    });
+  }, [masterRows, search, filterGudang, filterZone, filterStatus]);
+
+  const gudangOptions = useMemo(() => ["All", ...Array.from(new Set(masterRows.map((r) => r.gudang).filter(Boolean)))], [masterRows]);
+  const zoneOptions = useMemo(() => ["All", ...Array.from(new Set(masterRows.map((r) => r.zoneType).filter(Boolean)))], [masterRows]);
+  const statusOptions = useMemo(() => ["All", ...Array.from(new Set(masterRows.map((r) => r.status).filter(Boolean)))], [masterRows]);
+
+  function toggleSelect(code: string) {
+    setSelected((prev) => {
+      const n = new Set(prev);
+      if (n.has(code)) n.delete(code); else n.add(code);
+      return n;
+    });
+  }
+  function selectAllFiltered() {
+    setSelected(new Set(filteredMaster.map((r) => r.palletCode)));
+  }
+  function clearSelected() {
+    setSelected(new Set());
+  }
+  function generateFromSelected() {
+    const toAdd = masterRows.filter((r) => selected.has(r.palletCode));
+    if (!toAdd.length) return;
+    const base = activeCard;
+    const newCards = toAdd.map((r) => masterToCard(r, base));
+    setCards((p) => [...p, ...newCards]);
+    // set active to first new
+    if (newCards.length) setActiveId(newCards[0].id);
+  }
+  function generateFromFiltered() {
+    const newCards = filteredMaster.map((r) => masterToCard(r, activeCard));
+    setCards((p) => [...p, ...newCards]);
+    if (newCards.length) setActiveId(newCards[0].id);
+  }
+  function generateAllMaster() {
+    const newCards = masterRows.map((r) => masterToCard(r, activeCard));
+    setCards((p) => [...p, ...newCards]);
+    if (newCards.length) setActiveId(newCards[0].id);
+  }
+
+  // persist
   useEffect(() => {
     const saved = localStorage.getItem("kartustock:cards");
     if (saved) {
@@ -106,20 +238,131 @@ export default function Generator() {
         }
       } catch {}
     }
+    const savedMaster = localStorage.getItem("kartustock:masterRows");
+    if (savedMaster) {
+      try { const p = JSON.parse(savedMaster); if (Array.isArray(p) && p.length) setMasterRows(p); } catch {}
+    }
+    const savedUrl = localStorage.getItem("kartustock:sheetUrl");
+    if (savedUrl) setSheetUrl(savedUrl);
   }, []);
 
   useEffect(() => {
     localStorage.setItem("kartustock:cards", JSON.stringify(cards));
-    // optional sync to MySQL - fire and forget, won't break if no DB
-    fetch("/api/cards", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(cards),
-    }).catch(() => {});
+    fetch("/api/cards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cards) }).catch(() => {});
   }, [cards]);
 
+  useEffect(() => { localStorage.setItem("kartustock:masterRows", JSON.stringify(masterRows)); }, [masterRows]);
+  useEffect(() => { localStorage.setItem("kartustock:sheetUrl", sheetUrl); }, [sheetUrl]);
+
   return (
-    <div className="w-full max-w-[1600px] mx-auto">
+    <div className="w-full max-w-[1600px] mx-auto space-y-6">
+      {/* MASTER DATA PANEL */}
+      <div className="no-print bg-white rounded-2xl border border-zinc-200 shadow-sm overflow-hidden">
+        <button onClick={() => setShowMaster(!showMaster)} className="w-full flex items-center justify-between px-5 py-4 bg-gradient-to-r from-zinc-900 to-zinc-800 text-white">
+          <div className="flex items-center gap-3">
+            <span className="w-9 h-9 rounded-xl bg-amber-500 grid place-items-center text-black font-black text-sm">{masterRows.length || "◉"}</span>
+            <div className="text-left">
+              <div className="font-black text-sm flex items-center gap-2">Master Data — Pallet Mapping <span className="bg-amber-500 text-black text-[10px] px-2 py-0.5 rounded-full">NEW</span></div>
+              <div className="text-xs text-zinc-400">{masterRows.length ? `${masterRows.length} pallets loaded • ${selected.size} selected • ${filteredMaster.length} filtered` : "Connect your Google Sheets 'Pallet Code' tab or upload CSV → choose pallets to generate Stock Cards"}</div>
+            </div>
+          </div>
+          <span className={`w-8 h-8 rounded-full bg-white/10 grid place-items-center transition ${showMaster ? "rotate-180" : ""}`}>▼</span>
+        </button>
+
+        {showMaster && (
+          <div className="p-5 space-y-4">
+            {/* Load row */}
+            <div className="grid lg:grid-cols-[1fr_auto] gap-3">
+              <div className="flex gap-2">
+                <input value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} placeholder="Paste Google Sheets URL (https://docs.google.com/spreadsheets/d/.../edit#gid=1688169041)" className="flex-1 bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-3 text-sm focus:outline-none focus:border-amber-500" />
+                <button onClick={loadFromSheet} disabled={loadingSheet} className="bg-amber-500 text-black font-black px-6 py-3 rounded-xl text-sm disabled:opacity-50 whitespace-nowrap hover:bg-amber-400">
+                  {loadingSheet ? "Loading…" : "↗ Load Sheet"}
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <label className="flex-1 lg:flex-none bg-zinc-900 text-white px-5 py-3 rounded-xl text-sm font-bold text-center cursor-pointer hover:bg-black">
+                  📄 Upload Master CSV
+                  <input type="file" accept=".csv" className="hidden" onChange={handleMasterCSVUpload} />
+                </label>
+                {masterRows.length > 0 && <button onClick={() => { setMasterRows([]); setSelected(new Set()); setMasterSource(""); localStorage.removeItem("kartustock:masterRows"); }} className="px-4 py-3 rounded-xl border border-zinc-200 text-sm font-semibold">Clear</button>}
+              </div>
+            </div>
+            {sheetError && <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl px-4 py-3 leading-relaxed">{sheetError}</div>}
+            {!sheetError && masterSource && <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl px-4 py-2.5">✓ {masterSource} — ready. Use filters & checkboxes below, then generate.</div>}
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs leading-relaxed text-amber-900">
+              <b>How to connect:</b> Open your spreadsheet → <b>Share → General access → Anyone with link (Viewer)</b> → Copy URL here → Load. Or <b>File → Download → CSV</b> and upload. The app auto-detects side-by-side tables (C11/C12 etc) in the “Pallet Code” tab.
+              <br/><span className="text-amber-700">Privacy: URL is stored only in your browser (localStorage), never hardcoded or sent elsewhere except to fetch the sheet.</span>
+            </div>
+
+            {masterRows.length > 0 && (
+              <>
+                {/* Filters */}
+                <div className="grid grid-cols-1 lg:grid-cols-[1fr_160px_160px_160px] gap-3">
+                  <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="🔍 Search pallet / SKU / zone…" className="bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-amber-500" />
+                  <select value={filterGudang} onChange={(e) => setFilterGudang(e.target.value)} className="bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2.5 text-sm">
+                    {gudangOptions.map((o) => <option key={o} value={o}>{o === "All" ? "All Gudang" : o}</option>)}
+                  </select>
+                  <select value={filterZone} onChange={(e) => setFilterZone(e.target.value)} className="bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2.5 text-sm">
+                    {zoneOptions.map((o) => <option key={o} value={o}>{o === "All" ? "All Zone Type" : o}</option>)}
+                  </select>
+                  <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="bg-zinc-50 border border-zinc-200 rounded-xl px-3 py-2.5 text-sm">
+                    {statusOptions.map((o) => <option key={o} value={o}>{o === "All" ? "All Status" : o}</option>)}
+                  </select>
+                </div>
+
+                {/* Actions */}
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={selectAllFiltered} className="text-xs bg-zinc-900 text-white px-4 py-2.5 rounded-full font-bold">☑ Select filtered ({filteredMaster.length})</button>
+                  <button onClick={clearSelected} className="text-xs bg-white border border-zinc-200 px-4 py-2.5 rounded-full font-semibold">Clear selection</button>
+                  <div className="flex-1" />
+                  <button onClick={generateFromSelected} disabled={selected.size === 0} className="text-xs bg-amber-500 text-black px-5 py-2.5 rounded-full font-black disabled:opacity-40">⚡ Generate {selected.size} Selected → Stock Cards</button>
+                  <button onClick={generateFromFiltered} disabled={filteredMaster.length === 0} className="text-xs bg-white border border-amber-300 text-amber-700 px-4 py-2.5 rounded-full font-bold disabled:opacity-40">Generate filtered ({filteredMaster.length})</button>
+                  <button onClick={generateAllMaster} className="text-xs bg-white border border-zinc-200 px-4 py-2.5 rounded-full font-semibold">Generate ALL ({masterRows.length})</button>
+                </div>
+
+                {/* Table */}
+                <div className="border border-zinc-200 rounded-xl overflow-hidden">
+                  <div className="max-h-[420px] overflow-auto">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-zinc-900 text-white text-[11px] tracking-wide">
+                        <tr>
+                          <th className="p-2.5 text-center w-10">
+                            <input type="checkbox" checked={filteredMaster.length > 0 && filteredMaster.every((r) => selected.has(r.palletCode))} onChange={(e) => e.target.checked ? selectAllFiltered() : clearSelected()} />
+                          </th>
+                          <th className="p-2.5 text-left">Pallet Code</th>
+                          <th className="p-2.5 text-left">Gudang</th>
+                          <th className="p-2.5 text-left">Zone</th>
+                          <th className="p-2.5 text-left">Level/Rack</th>
+                          <th className="p-2.5 text-left">Max Cap</th>
+                          <th className="p-2.5 text-left">SKU</th>
+                          <th className="p-2.5 text-left">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredMaster.map((r) => (
+                          <tr key={r.palletCode} className={`border-t border-zinc-100 hover:bg-amber-50/60 ${selected.has(r.palletCode) ? "bg-amber-100/70" : "bg-white"}`}>
+                            <td className="p-2.5 text-center"><input type="checkbox" checked={selected.has(r.palletCode)} onChange={() => toggleSelect(r.palletCode)} /></td>
+                            <td className="p-2.5 font-mono font-bold">{r.palletCode}</td>
+                            <td className="p-2.5">{r.gudang || "—"}</td>
+                            <td className="p-2.5">{r.zoneType || "—"}</td>
+                            <td className="p-2.5">{r.levelRack || "—"}</td>
+                            <td className="p-2.5">{r.maxCapacity && r.maxCapacity !== "-" ? `${r.maxCapacity} (${r.inPack})` : "—"}</td>
+                            <td className="p-2.5 max-w-[180px] truncate" title={r.currentSku}>{r.currentSku && r.currentSku !== "None" ? r.currentSku : <span className="text-zinc-400">—</span>}</td>
+                            <td className="p-2.5"><span className={`px-2 py-1 rounded-full text-[10px] font-bold ${r.status.toLowerCase().includes("avail") ? "bg-emerald-100 text-emerald-700" : r.status.toLowerCase().includes("occup") ? "bg-orange-100 text-orange-700" : "bg-zinc-100"}`}>{r.status || "—"}</span></td>
+                          </tr>
+                        ))}
+                        {filteredMaster.length === 0 && <tr><td colSpan={8} className="p-8 text-center text-zinc-400">No pallets match filters</td></tr>}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                <div className="text-[11px] text-zinc-500">Tip: Selected pallets become Stock Cards with Zone = Zone Type • Level/Rack, SKU = Current Assigned SKU, Max Qty = Max Capacity. You can still edit each card after generation.</div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-6 items-start">
         {/* LEFT PANEL - FORM */}
         <div className="no-print sticky top-6 space-y-4">
@@ -357,7 +600,6 @@ export default function Generator() {
             </div>
           </div>
 
-          {/* Single Active Preview - flagship */}
           <div ref={previewRef} className="bg-[#EEF0F2] p-4 sm:p-8 rounded-[24px] border border-zinc-200 shadow-inner">
             <StockCard data={activeCard} />
             <div className="no-print mt-4 flex justify-center gap-2 text-[10px] text-zinc-500">
@@ -367,7 +609,6 @@ export default function Generator() {
             </div>
           </div>
 
-          {/* All cards for bulk print - hidden on screen pagination but shown for print */}
           <div className="bg-white rounded-2xl border border-zinc-200 p-4 no-print">
             <h3 className="text-xs font-black tracking-widest text-zinc-500 uppercase mb-3">Bulk Print Queue — prints each card on its own page</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[520px] overflow-auto p-1">
@@ -389,7 +630,6 @@ export default function Generator() {
             </div>
           </div>
 
-          {/* Print-only bulk */}
           <div className="hidden print:block space-y-8">
             {cards.map((c) => (
               <div key={c.id} className="break-after-page print-break-inside-avoid">
