@@ -47,6 +47,10 @@ export default function Generator() {
   const [filterStatus, setFilterStatus] = useState("All");
   const [showMaster, setShowMaster] = useState(true);
   const [masterSource, setMasterSource] = useState<string>("");
+  // Bulk Print A4 state
+  const [printLayout, setPrintLayout] = useState<"1" | "2">("1");
+  const [ephemeralPrint, setEphemeralPrint] = useState<StockCardData[] | null>(null);
+  const [autoPrintOnGenerate, setAutoPrintOnGenerate] = useState(false);
 
   const activeCard = cards.find((c) => c.id === activeId) || cards[0];
 
@@ -235,6 +239,38 @@ export default function Generator() {
     if (newCards.length) setActiveId(newCards[0].id);
   }
 
+  // Bulk Print A4 + Generate & Print
+  function triggerPrint(cardsToPrint: StockCardData[] | null, layout: "1" | "2") {
+    if (cardsToPrint && cardsToPrint.length) setEphemeralPrint(cardsToPrint);
+    else setEphemeralPrint(null);
+    setPrintLayout(layout);
+    // wait for DOM then print
+    setTimeout(() => window.print(), 350);
+  }
+  function generateAndPrintSelected() {
+    const sel = masterRows.filter((r) => selected.has(r.palletCode));
+    if (!sel.length) return;
+    const newCards = sel.map((r) => masterToCard(r, activeCard));
+    setCards((p) => [...p, ...newCards]);
+    if (newCards.length) setActiveId(newCards[0].id);
+    // Generate & Print: print only the newly generated selected cards in A4
+    triggerPrint(newCards, printLayout);
+  }
+  function handleBulkPrintA4(target: "all" | "selected" | "filtered") {
+    let toPrint: StockCardData[] = [];
+    if (target === "all") toPrint = cards;
+    else if (target === "filtered") toPrint = filteredMaster.map((r) => masterToCard(r, activeCard));
+    else if (target === "selected") {
+      // Prefer printing from queue that matches selected pallet codes, else from master
+      const selectedCodes = selected;
+      const queueSelected = cards.filter((c) => selectedCodes.has(c.palletCode));
+      if (queueSelected.length) toPrint = queueSelected;
+      else toPrint = masterRows.filter((r) => selectedCodes.has(r.palletCode)).map((r) => masterToCard(r, activeCard));
+    }
+    if (!toPrint.length) return;
+    triggerPrint(toPrint, printLayout);
+  }
+
   // persist
   useEffect(() => {
     const saved = localStorage.getItem("kartustock:cards");
@@ -262,6 +298,13 @@ export default function Generator() {
 
   useEffect(() => { localStorage.setItem("kartustock:masterRows", JSON.stringify(masterRows)); }, [masterRows]);
   useEffect(() => { localStorage.setItem("kartustock:sheetUrl", sheetUrl); }, [sheetUrl]);
+
+  // clear ephemeral print after printing (so next normal Bulk Print prints all)
+  useEffect(() => {
+    const clear = () => setEphemeralPrint(null);
+    window.addEventListener("afterprint", clear);
+    return () => window.removeEventListener("afterprint", clear);
+  }, []);
 
   return (
     <div className="w-full max-w-[1600px] mx-auto space-y-6">
@@ -326,14 +369,45 @@ export default function Generator() {
                   </select>
                 </div>
 
+                {/* Want to Selected Generate & Print option */}
+                <label className="flex items-center gap-2.5 bg-white border border-amber-300 rounded-xl px-4 py-3 cursor-pointer hover:bg-amber-50/50">
+                  <input type="checkbox" checked={autoPrintOnGenerate} onChange={(e) => setAutoPrintOnGenerate(e.target.checked)} className="w-4 h-4 accent-amber-500" />
+                  <span className="text-xs font-black tracking-wide">Want to Selected Generate & Print Stock Cards?</span>
+                  <span className="text-[11px] text-zinc-500 ml-auto hidden sm:block">When ON, Generate will auto-print A4</span>
+                </label>
                 {/* Actions */}
                 <div className="flex flex-wrap gap-2">
                   <button onClick={selectAllFiltered} className="text-xs bg-zinc-900 text-white px-4 py-2.5 rounded-full font-bold">☑ Select filtered ({filteredMaster.length})</button>
                   <button onClick={clearSelected} className="text-xs bg-white border border-zinc-200 px-4 py-2.5 rounded-full font-semibold">Clear selection</button>
                   <div className="flex-1" />
-                  <button onClick={generateFromSelected} disabled={selected.size === 0} className="text-xs bg-amber-500 text-black px-5 py-2.5 rounded-full font-black disabled:opacity-40">⚡ Generate {selected.size} Selected → Stock Cards</button>
+                  <button
+                    onClick={() => {
+                      if (autoPrintOnGenerate) generateAndPrintSelected();
+                      else generateFromSelected();
+                    }}
+                    disabled={selected.size === 0}
+                    className={`text-xs px-5 py-2.5 rounded-full font-black disabled:opacity-40 ${autoPrintOnGenerate ? "bg-gradient-to-r from-amber-500 to-orange-500 text-black" : "bg-amber-500 text-black"}`}
+                  >
+                    {autoPrintOnGenerate ? `🖨️ Generate & Print ${selected.size} Selected → A4` : `⚡ Generate ${selected.size} Selected → Stock Cards`}
+                  </button>
                   <button onClick={generateFromFiltered} disabled={filteredMaster.length === 0} className="text-xs bg-white border border-amber-300 text-amber-700 px-4 py-2.5 rounded-full font-bold disabled:opacity-40">Generate filtered ({filteredMaster.length})</button>
                   <button onClick={generateAllMaster} className="text-xs bg-white border border-zinc-200 px-4 py-2.5 rounded-full font-semibold">Generate ALL ({masterRows.length})</button>
+                </div>
+                {/* Generate & Print + Bulk Print A4 */}
+                <div className="bg-zinc-900 rounded-xl p-3 flex flex-wrap gap-2 items-center border border-zinc-800">
+                  <div className="flex items-center gap-2 text-white text-xs font-bold">
+                    <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" /> Bulk Print A4
+                    <select value={printLayout} onChange={(e) => setPrintLayout(e.target.value as "1" | "2")} className="ml-2 bg-white text-black rounded-full px-3 py-1.5 text-xs font-bold">
+                      <option value="1">1 / page (large)</option>
+                      <option value="2">2 / page (saving)</option>
+                    </select>
+                  </div>
+                  <div className="flex-1" />
+                  <button onClick={generateAndPrintSelected} disabled={selected.size === 0} className="text-xs bg-gradient-to-r from-amber-500 to-orange-500 text-black px-5 py-2.5 rounded-full font-black disabled:opacity-40 flex items-center gap-1.5">
+                    🖨️ Generate & Print Selected ({selected.size}) → A4
+                  </button>
+                  <button onClick={() => handleBulkPrintA4("selected")} disabled={selected.size === 0} className="text-xs bg-white text-black px-4 py-2.5 rounded-full font-bold disabled:opacity-40">Bulk Print Selected A4</button>
+                  <button onClick={() => handleBulkPrintA4("filtered")} disabled={filteredMaster.length === 0} className="text-xs bg-zinc-800 text-white border border-zinc-700 px-4 py-2.5 rounded-full font-semibold">Bulk Print Filtered A4 ({filteredMaster.length})</button>
                 </div>
 
                 {/* Table */}
@@ -626,7 +700,16 @@ export default function Generator() {
           </div>
 
           <div className="bg-white rounded-2xl border border-zinc-200 p-4 no-print">
-            <h3 className="text-xs font-black tracking-widest text-zinc-500 uppercase mb-3">Bulk Print Queue — prints each card on its own page</h3>
+            <div className="flex flex-wrap gap-2 justify-between items-center mb-3">
+              <h3 className="text-xs font-black tracking-widest text-zinc-500 uppercase">Bulk Print Queue — A4 Ready</h3>
+              <div className="flex gap-2 items-center">
+                <select value={printLayout} onChange={(e) => setPrintLayout(e.target.value as "1" | "2")} className="bg-zinc-900 text-white rounded-full px-3 py-1.5 text-xs font-bold">
+                  <option value="1">1 / A4</option>
+                  <option value="2">2 / A4</option>
+                </select>
+                <button onClick={() => triggerPrint(null, printLayout)} disabled={!cards.length} className="text-xs bg-amber-500 text-black px-4 py-2 rounded-full font-black disabled:opacity-40">🖨️ Bulk Print A4 — All ({cards.length})</button>
+              </div>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[520px] overflow-auto p-1">
               {cards.map((c) => (
                 <div
@@ -644,14 +727,37 @@ export default function Generator() {
                 </div>
               ))}
             </div>
+            {cards.length > 1 && <div className="mt-3 flex gap-2">
+              <button onClick={() => triggerPrint(cards, printLayout)} className="flex-1 bg-zinc-900 text-white py-2.5 rounded-xl text-xs font-black">🖨️ Print All {cards.length} Cards — {printLayout === "2" ? "2 per A4 (saving)" : "1 per A4"}</button>
+            </div>}
           </div>
 
-          <div className="hidden print:block space-y-8">
-            {cards.map((c) => (
-              <div key={c.id} className="break-after-page print-break-inside-avoid">
-                <StockCard data={c} />
-              </div>
-            ))}
+          {/* Ephemeral / Bulk Print A4 - print only */}
+          <div className="hidden print:block">
+            {(() => {
+              const toPrint = ephemeralPrint && ephemeralPrint.length ? ephemeralPrint : cards;
+              if (printLayout === "2") {
+                // 2 cards per A4
+                return (
+                  <div className="space-y-4">
+                    {toPrint.map((c, idx) => (
+                      <div key={c.id} style={{ breakInside: "avoid", breakAfter: (idx % 2 === 1 && idx !== toPrint.length - 1) ? "page" : "auto", marginBottom: idx % 2 === 0 ? "8mm" : "0" }}>
+                        <StockCard data={c} />
+                      </div>
+                    ))}
+                  </div>
+                );
+              }
+              return (
+                <div className="space-y-8">
+                  {toPrint.map((c) => (
+                    <div key={c.id} style={{ breakAfter: "page", breakInside: "avoid" }}>
+                      <StockCard data={c} />
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         </div>
       </div>
